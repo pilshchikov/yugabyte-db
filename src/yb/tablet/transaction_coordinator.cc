@@ -1945,8 +1945,15 @@ class TransactionCoordinator::Impl : public TransactionStateContext,
         } else {
           if (leader) {
             metrics_.Increment(TabletCounters::kExpiredTransactions);
-            bool modified = index.modify(it, [](TransactionState& state) {
+            bool modified = index.modify(it, [this, now](TransactionState& state) {
               YB_LOG_EVERY_N_SECS(INFO, 1) << state.LogPrefix() << "Cleanup expired transaction";
+              YB_LOG_TIMEOUT_EXPIRED(
+                  "transaction_max_missed_heartbeat_periods",
+                  ToMilliseconds(GetTransactionTimeout()),
+                  (now.GetPhysicalValueMicros() - state.last_touch().GetPhysicalValueMicros()) /
+                      1000)
+                  << "txn=" << state.id() << " status=" << AsString(state.status())
+                  << " coordinator=" << LogPrefix();
               state.Abort();
             });
             DCHECK(modified);

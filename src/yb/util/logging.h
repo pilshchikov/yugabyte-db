@@ -134,6 +134,21 @@
 #define YB_LOG_WITH_PREFIX_UNLOCKED_EVERY_N_SECS(severity, n_secs) \
     YB_LOG_EVERY_N_SECS(severity, n_secs) << LogPrefixUnlocked()
 
+// One greppable WARNING per timeout expiry, throttled per call site. Brace it when used under if.
+#define YB_LOG_TIMEOUT_EXPIRED_IF(enabled, name, limit_ms, waited_ms) \
+  static yb::logging_internal::LogThrottler BOOST_PP_CAT(TIMEOUT_THROTTLER_, __LINE__); \
+  if (int cnt = 0; \
+      (enabled) && (cnt = BOOST_PP_CAT(TIMEOUT_THROTTLER_, __LINE__).ShouldLog(1)) >= 0) \
+  yb::logging_internal::MakeThrottledLogWriter(GOOGLE_LOG_WARNING(cnt), "").stream() \
+      << "TIMEOUT_EXPIRED name=" << (name) << " limit_ms=" << (limit_ms) \
+      << " waited_ms=" << (waited_ms) << " "
+
+#define YB_LOG_TIMEOUT_EXPIRED(name, limit_ms, waited_ms) \
+  YB_LOG_TIMEOUT_EXPIRED_IF(yb::TimeoutExpiredLogEnabled(), name, limit_ms, waited_ms)
+
+#define YB_LOG_RPC_TIMEOUT_EXPIRED(name, limit_ms, waited_ms) \
+  YB_LOG_TIMEOUT_EXPIRED_IF(yb::RpcTimeoutExpiredLogEnabled(), name, limit_ms, waited_ms)
+
 // Logs a messages with 2 different severities. By default used severity1, but if during
 // duration there were more than count messages, then it will use severity2.
 #define YB_LOG_HIGHER_SEVERITY_WHEN_TOO_MANY(severity1, severity2, duration, count) \
@@ -316,6 +331,9 @@ void ShutdownLoggingSafe();
 
 // Internal function. Used by tooling for integrating with PostgreSQL C codebase.
 void InitializeGoogleLogging(const char *arg);
+
+bool TimeoutExpiredLogEnabled();
+bool RpcTimeoutExpiredLogEnabled();
 
 namespace logging_internal {
 

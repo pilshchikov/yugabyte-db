@@ -2494,7 +2494,7 @@ class AcquireObjectLocksGlobalRpc
       YBClient* client, master::AcquireObjectLocksGlobalRequestPB request,
       StdStatusCallback user_cb, CoarseTimePoint deadline, std::function<Status()>&& should_retry)
       : ClientMasterRpc(client, deadline), user_cb_(std::move(user_cb)),
-        should_retry_(std::move(should_retry)) {
+        should_retry_(std::move(should_retry)), deadline_(deadline) {
     req_.CopyFrom(request);
   }
 
@@ -2515,6 +2515,10 @@ class AcquireObjectLocksGlobalRpc
     if (!status.IsTryAgain()) {
       return false;
     }
+    YB_LOG_TIMEOUT_EXPIRED(
+        "object_lock_global_acquire_try_again", ToMilliseconds(deadline_ - start_),
+        ToMilliseconds(CoarseMonoClock::Now() - start_))
+        << "rpc=AcquireObjectLocksGlobal attempts=" << num_attempts() << " status=" << status;
     if (auto s = should_retry_(); !s.ok()) {
       error_ = s;
       return false;
@@ -2539,6 +2543,8 @@ class AcquireObjectLocksGlobalRpc
   StdStatusCallback user_cb_;
   std::function<Status()> should_retry_;
   Status error_ = Status::OK();
+  const CoarseTimePoint deadline_;
+  const CoarseTimePoint start_ = CoarseMonoClock::Now();
 };
 
 class ReleaseObjectLocksGlobalRpc

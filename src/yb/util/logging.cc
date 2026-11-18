@@ -85,6 +85,12 @@ DEFINE_RUNTIME_bool(disable_core_dumps_on_fatal, true,
     "Whether to disable core dumps when a FATAL log is encountered. "
     "Set to false to allow full core dumps on FATAL for debugging purposes.");
 
+DEFINE_RUNTIME_bool(log_timeout_expired, true,
+    "Log a throttled TIMEOUT_EXPIRED warning when a named timeout expires.");
+
+DEFINE_RUNTIME_bool(log_rpc_timeout_expired, false,
+    "Log a throttled TIMEOUT_EXPIRED warning for every timed out outbound RPC. High volume.");
+
 DECLARE_bool(TEST_running_test);
 
 const char* kProjName = "yb";
@@ -227,6 +233,14 @@ void ApplyFlagsInternal() {
 }
 
 } // anonymous namespace
+
+bool TimeoutExpiredLogEnabled() {
+  return FLAGS_log_timeout_expired;
+}
+
+bool RpcTimeoutExpiredLogEnabled() {
+  return FLAGS_log_timeout_expired && FLAGS_log_rpc_timeout_expired;
+}
 
 void InitializeGoogleLogging(const char *arg) {
   google::InitGoogleLogging(arg);

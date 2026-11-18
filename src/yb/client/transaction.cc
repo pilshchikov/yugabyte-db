@@ -2457,6 +2457,15 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     } else {
       auto state = state_.load(std::memory_order_acquire);
       LOG_WITH_PREFIX(WARNING) << "Send heartbeat failed: " << status << ", txn state: " << state;
+      if (status.IsExpired()) {
+        const auto start_us = start_.load(std::memory_order_relaxed);
+        YB_LOG_TIMEOUT_EXPIRED(
+            "transaction_max_missed_heartbeat_periods", "coordinator_side",
+            start_us == 0 ? 0 :
+                (manager_->clock()->Now().GetPhysicalValueMicros() - start_us) / 1000)
+            << "side=client txn_state=" << state << " heartbeat_status=" << status << " "
+            << LogPrefix();
+      }
 
       if (status.IsAborted() || status.IsExpired() || status.IsShutdownInProgress() ||
           status.IsDeleted() || manager_->IsClosing()) {

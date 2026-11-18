@@ -846,6 +846,11 @@ Status ObjectLockManagerImpl::MakePrepareAcquireResult(
     const LockData& data, Status resume_with_status) {
   RETURN_NOT_OK(resume_with_status);
   if (data.deadline < CoarseMonoClock::Now()) {
+    YB_LOG_TIMEOUT_EXPIRED(
+        "object_lock_acquire_deadline",
+        "unknown", (MonoTime::Now() - data.start_time).ToMilliseconds())
+        << "txn=" << data.object_lock_owner.txn_id << " status_tablet=" << data.status_tablet
+        << " stage=prepare_acquire";
     return kTryAgain;
   }
   if (shutdown_in_progress_) {
@@ -1242,6 +1247,18 @@ void ObjectLockManagerImpl::Poll() {
       while (!index.empty() && (*index.begin())->deadline() <= now) {
         auto waiter_entry = *index.begin();
         index.erase(index.begin());
+        {
+          const auto waited_ms = (MonoTime::Now() - waiter_entry->lock_data.start_time)
+                                     .ToMilliseconds();
+          YB_LOG_TIMEOUT_EXPIRED(
+              "object_lock_acquire_deadline",
+              waited_ms - ToMilliseconds(now - waiter_entry->deadline()), waited_ms)
+              << "txn=" << waiter_entry->txn_id()
+              << " key=" << AsString(waiter_entry->resume_it()->key)
+              << " mode=" << AsString(waiter_entry->resume_it()->intent_types)
+              << " blocking_txns=" << AsString(waiter_entry->blocking_txn_ids)
+              << " status_tablet=" << waiter_entry->status_tablet();
+        }
         entry->waiting_state.fetch_sub(IntentTypeSetAdd(waiter_entry->resume_it()->intent_types));
         timed_out_waiters.push_back(std::move(waiter_entry));
       }
