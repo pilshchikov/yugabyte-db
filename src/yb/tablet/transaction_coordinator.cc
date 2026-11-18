@@ -1952,7 +1952,7 @@ class TransactionCoordinator::Impl : public TransactionStateContext,
                   ToMilliseconds(GetTransactionTimeout()),
                   (now.GetPhysicalValueMicros() - state.last_touch().GetPhysicalValueMicros()) /
                       1000)
-                  << "txn=" << state.id() << " status=" << AsString(state.status())
+                  << "txn=" << state.id() << " status=" << TransactionStatus_Name(state.status())
                   << " coordinator=" << LogPrefix();
               state.Abort();
             });

@@ -3549,7 +3549,8 @@ class PgClientSession::Impl {
                 FLAGS_ddl_verification_timeout_multiplier *
                     client_.default_admin_operation_timeout().ToMilliseconds(),
                 ToMilliseconds(CoarseMonoClock::Now() - wait_start))
-                << "txn=" << metadata->transaction_id << " commit=" << (commit ? (*commit ? "true" : "false") : "unknown")
+                << "txn=" << metadata->transaction_id
+                << " commit=" << (commit ? (*commit ? "true" : "false") : "unknown")
                 << " swallowed=true";
           }
           WARN_NOT_OK(wait_status, "WaitForDdlVerificationToFinish call failed");
