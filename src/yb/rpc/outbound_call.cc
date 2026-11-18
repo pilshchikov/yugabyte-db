@@ -800,6 +800,11 @@ void OutboundCall::DoSetTimedOut(Status status) {
     invoke_callback = SetState(RpcCallState::TIMED_OUT, status_);
   }
   if (invoke_callback) {
+    YB_LOG_RPC_TIMEOUT_EXPIRED(
+        "rpc_timeout", controller_->timeout().ToMilliseconds(),
+        MonoDelta(CoarseMonoClock::Now() - start_).ToMilliseconds())
+        << "rpc=" << remote_method_.ToString() << " peer=" << conn_id_.remote()
+        << " call_id=" << call_id_;
     InvokeCallback();
   }
 }

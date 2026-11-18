@@ -186,13 +186,15 @@ class TransactionStatusResolver::Impl {
       return;
     }
     auto client = client_result.get();
+    const auto start = CoarseMonoClock::Now();
+    const auto deadline = std::min(deadline_, TransactionRpcDeadline());
     if (!client || !rpcs_.RegisterAndStart(
         client::GetTransactionStatus(
-            std::min(deadline_, TransactionRpcDeadline()),
+            deadline,
             nullptr /* tablet */,
             client,
             &req,
-            std::bind(&Impl::StatusReceived, this, _1, _2, request_size)),
+            std::bind(&Impl::StatusReceived, this, _1, _2, request_size, start, deadline)),
         &handle_)) {
       Complete(STATUS(Aborted, "Aborted because cannot start RPC"));
     }
@@ -230,7 +232,7 @@ class TransactionStatusResolver::Impl {
 
   void StatusReceived(Status status,
                       const tserver::GetTransactionStatusResponsePB& response,
-                      int request_size) {
+                      int request_size, CoarseTimePoint start, CoarseTimePoint deadline) {
     VLOG_WITH_PREFIX(2) << "Received statuses: " << status << ", " << response.ShortDebugString();
     DEBUG_ONLY_TEST_SYNC_POINT("TransactionStatusResolver::Impl::StatusReceived");
     AtomicFlagSleepMs(&FLAGS_TEST_inject_status_resolver_unregister_rpc_delay_ms);
@@ -248,6 +250,13 @@ class TransactionStatusResolver::Impl {
       LOG_WITH_PREFIX_COND_SEVERITY(
           FLAGS_TEST_fatal_on_transaction_status_request_failure, FATAL, WARNING)
           << "Failed to request transaction status: " << status;
+      if (status.IsTimedOut()) {
+        YB_LOG_TIMEOUT_EXPIRED(
+            "transaction_rpc_timeout_ms", ToMilliseconds(deadline - start),
+            ToMilliseconds(CoarseMonoClock::Now() - start))
+            << "rpc=GetTransactionStatus status_tablet=" << queues_.begin()->first
+            << " num_txns=" << request_size << " " << LogPrefix();
+      }
       if (status.IsAborted() || status.IsShutdownInProgress()) {
         Complete(status);
       } else {

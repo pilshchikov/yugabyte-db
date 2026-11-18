@@ -840,6 +840,10 @@ Status SysCatalogTable::SyncWrite(SysCatalogWriter* writer) {
       if (time >= deadline) {
         LOG(WARNING) << "Already waited for a total of " << ::yb::ToString(waited_so_far) << ". "
                      << "Returning a timeout from SyncWrite.";
+        YB_LOG_TIMEOUT_EXPIRED(
+            "sys_catalog_write_timeout_ms", FLAGS_sys_catalog_write_timeout_ms,
+            ToMilliseconds(time - (deadline - FLAGS_sys_catalog_write_timeout_ms * 1ms)))
+            << "op=SyncWrite leader_term=" << writer->leader_term();
         return STATUS_FORMAT(TimedOut, "SyncWrite timed out after $0", waited_so_far);
       }
     }

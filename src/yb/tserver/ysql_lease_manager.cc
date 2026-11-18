@@ -29,6 +29,7 @@
 #include "yb/util/atomic.h"
 #include "yb/util/debug-util.h"
 #include "yb/util/locks.h"
+#include "yb/util/logging.h"
 #include "yb/util/mutex.h"
 #include "yb/util/status_log.h"
 
@@ -103,6 +104,7 @@ class YSQLLeaseManager::Impl {
   // Held while toggling the lease from expired to live and from live to expired.
   mutable Mutex lease_toggle_lock_;
   CoarseTimePoint lease_expiry_time_ GUARDED_BY(lease_toggle_lock_);
+  CoarseTimePoint lease_update_time_ GUARDED_BY(lease_toggle_lock_);
   bool lease_is_live_ GUARDED_BY(lock_){false};
   uint64_t lease_epoch_ GUARDED_BY(lock_){0};
 };
@@ -154,6 +156,7 @@ Status YSQLLeaseManager::Impl::ProcessLeaseUpdate(
       }
     }
     lease_expiry_time_ = new_lease_expiry_time;
+    lease_update_time_ = CoarseMonoClock::Now();
     lease_is_live_ = true;
     lease_epoch_ = lease_refresh_info.lease_epoch();
   }
@@ -287,6 +290,7 @@ std::optional<CoarseTimePoint> YSQLLeaseManager::Impl::CheckLeaseStatusInner() {
   // We hold lease_toggle_lock_ for function scope to sychronize with the lease refresher.
   // We do not hold lock_ for function scope so that RPCs are not blocked for too long.
   MutexLock l(lease_toggle_lock_);
+  uint64_t lease_epoch;
   {
     std::lock_guard lock(lock_);
     if (!lease_is_live_) {
@@ -296,7 +300,13 @@ std::optional<CoarseTimePoint> YSQLLeaseManager::Impl::CheckLeaseStatusInner() {
       return lease_expiry_time_;
     }
     lease_is_live_ = false;
+    lease_epoch = lease_epoch_;
   }
+  YB_LOG_TIMEOUT_EXPIRED(
+      "ysql_operation_lease_ttl", ToMilliseconds(lease_expiry_time_ - lease_update_time_),
+      ToMilliseconds(CoarseMonoClock::now() - lease_update_time_))
+      << "side=tserver lease_epoch=" << lease_epoch
+      << " waited_since=last_lease_refresh_received";
   // todo(zdrudi): make this a fatal?
   LOG(INFO) << "Lease has expired, killing pg sessions.";
   if (FLAGS_TEST_delay_ysql_lease_expiry_pg_kill_ms != 0) {

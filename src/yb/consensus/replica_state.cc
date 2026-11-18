@@ -64,6 +64,8 @@
 
 using namespace std::literals;
 
+DECLARE_int32(leader_lease_duration_ms);
+
 DEFINE_UNKNOWN_int32(inject_delay_commit_pre_voter_to_voter_secs, 0,
              "Amount of time to delay commit of a PRE_VOTER to VOTER transition. To be used for "
              "unit testing purposes only.");
@@ -256,6 +258,14 @@ LeaderState ReplicaState::GetLeaderStateUnlocked(
           LeaderStatus::LEADER_BUT_OLD_LEADER_MAY_HAVE_LEASE);
 
     case LeaderLeaseStatus::NO_MAJORITY_REPLICATED_LEASE:
+      if (majority_replicated_lease_expiration_ != CoarseTimePoint() &&
+          majority_replicated_lease_expiration_ != CoarseTimePoint::min()) {
+        YB_LOG_TIMEOUT_EXPIRED(
+            "leader_lease_duration_ms", FLAGS_leader_lease_duration_ms,
+            FLAGS_leader_lease_duration_ms +
+                ToMilliseconds(CoarseMonoClock::Now() - majority_replicated_lease_expiration_))
+            << "event=leader_lease_lost term=" << GetCurrentTermUnlocked() << " " << LogPrefix();
+      }
       // Will retry to look up the leader, because it might have changed.
       return result.MakeNotReadyLeader(
           LeaderStatus::LEADER_BUT_NO_MAJORITY_REPLICATED_LEASE);

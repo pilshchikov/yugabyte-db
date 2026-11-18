@@ -1305,8 +1305,15 @@ void CatalogManager::LoadSysCatalogDataTask() {
   auto& consensus = consensus_result.get();
 
   const int64_t term = consensus->ConsensusState(CONSENSUS_CONFIG_ACTIVE).current_term();
+  const auto catchup_start = CoarseMonoClock::Now();
   Status s = WaitUntilCaughtUpAsLeader(
       MonoDelta::FromMilliseconds(FLAGS_master_failover_catchup_timeout_ms));
+  if (s.IsTimedOut()) {
+    YB_LOG_TIMEOUT_EXPIRED(
+        "master_failover_catchup_timeout_ms", FLAGS_master_failover_catchup_timeout_ms,
+        ToMilliseconds(CoarseMonoClock::Now() - catchup_start))
+        << "term=" << term << " status=" << s << " " << LogPrefix();
+  }
 
   int64_t term_after_wait = consensus->ConsensusState(CONSENSUS_CONFIG_ACTIVE).current_term();
   if (term_after_wait != term) {

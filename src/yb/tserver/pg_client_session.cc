@@ -182,6 +182,7 @@ DEFINE_test_flag(bool, perform_async_error, false,
     "returned success.");
 
 #ifdef __linux__
+DECLARE_uint32(ddl_verification_timeout_multiplier);
 DECLARE_bool(enable_qos);
 #endif
 
@@ -3540,8 +3541,18 @@ class PgClientSession::Impl {
           // (commit.has_value() is false), the purpose is to use the side effect of
           // WaitForDdlVerificationToFinish to trigger the start of a background task to
           // complete the DDL transaction at the DocDB side.
-          WARN_NOT_OK(client_.WaitForDdlVerificationToFinish(*metadata),
-                      "WaitForDdlVerificationToFinish call failed");
+          const auto wait_start = CoarseMonoClock::Now();
+          auto wait_status = client_.WaitForDdlVerificationToFinish(*metadata);
+          if (wait_status.IsTimedOut()) {
+            YB_LOG_TIMEOUT_EXPIRED(
+                "ddl_verification_timeout_multiplier",
+                FLAGS_ddl_verification_timeout_multiplier *
+                    client_.default_admin_operation_timeout().ToMilliseconds(),
+                ToMilliseconds(CoarseMonoClock::Now() - wait_start))
+                << "txn=" << metadata->transaction_id << " commit=" << (commit ? (*commit ? "true" : "false") : "unknown")
+                << " swallowed=true";
+          }
+          WARN_NOT_OK(wait_status, "WaitForDdlVerificationToFinish call failed");
         }
       }
     }

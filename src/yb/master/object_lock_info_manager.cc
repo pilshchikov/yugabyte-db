@@ -2042,6 +2042,13 @@ void ObjectLockInfoManager::Impl::CleanupExpiredLeaseEpochs(const LeaderEpoch& l
           "Tserver $0, instance seqno $1 with ysql lease epoch $2 has just lost its lease",
           object_info->id(), object_info_lock->pb.lease_info().instance_seqno(),
           object_info_lock->pb.lease_info().lease_epoch());
+      YB_LOG_TIMEOUT_EXPIRED(
+          "master_ysql_operation_lease_ttl_ms", FLAGS_master_ysql_operation_lease_ttl_ms,
+          FLAGS_master_ysql_operation_lease_ttl_ms +
+              (current_time - object_info->ysql_lease_deadline()).ToMilliseconds())
+          << "side=master tserver=" << object_info->id()
+          << " lease_epoch=" << object_info_lock->pb.lease_info().lease_epoch()
+          << " waited_since=last_lease_refresh_granted";
       object_info_lock.mutable_data()->pb.mutable_lease_info()->set_live_lease(false);
       object_infos_to_write.push_back(object_info.get());
       if (object_info_lock->pb.lease_epochs_size() > 0) {
