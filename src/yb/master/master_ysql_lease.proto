@@ -36,6 +36,8 @@ message RefreshYsqlLeaseInfoPB {
   // into multiple messages.
   optional tserver.DdlLockEntriesPB ddl_lock_entries = 3;
   optional uint64 lease_expiry_time_ms = 4;
+  optional uint64 lease_ttl_ms = 5;
+  optional uint64 client_buffer_ms = 6;
 }
 
 message RefreshYsqlLeaseResponsePB {

@@ -1367,6 +1367,7 @@ Status ObjectLockInfoManager::Impl::PopulateDbCatalogVersionCache(
 Status ObjectLockInfoManager::Impl::UnlockObjectSync(
     const ReleaseObjectLocksGlobalRequestPB& req, ReleaseObjectLockRequestPB&& tserver_req,
     CoarseTimePoint deadline) {
+  const auto start = CoarseMonoClock::Now();
   auto txn_id = VERIFY_RESULT(FullyDecodeTransactionId(req.txn_id()));
   // If the txn is scheduled for ddl verification, UnlockObject will be a no-op.
   // Let us first wait to make sure that it is not queued for ddl verification.
@@ -1387,6 +1388,11 @@ Status ObjectLockInfoManager::Impl::UnlockObjectSync(
     return future.get();
   }
   // Pre-persist failures run the callback inline, so a timeout means the request is persisted.
+  YB_LOG_TIMEOUT_EXPIRED(
+      "object_lock_release_deadline", ToMilliseconds(deadline - start),
+      ToMilliseconds(CoarseMonoClock::Now() - start))
+      << "side=master txn=" << txn_id << " request_id=" << request_id
+      << " outcome=persisted_not_applied_master_keeps_retrying";
   LOG(INFO) << Format(
       "Release request $0 for txn $1 is persisted but not yet applied by the deadline, the master "
       "will keep retrying it", request_id, txn_id);
@@ -1557,6 +1563,8 @@ Status ObjectLockInfoManager::Impl::RefreshYsqlLease(
   CHECK_GT(master_ttl, buffer);
   resp.mutable_info()->set_lease_expiry_time_ms(
       req.local_request_send_time_ms() + master_ttl - buffer);
+  resp.mutable_info()->set_lease_ttl_ms(master_ttl);
+  resp.mutable_info()->set_client_buffer_ms(buffer);
   // Sanity check that the tserver has already registered with the same instance_seqno.
   RETURN_NOT_OK(master_.ts_manager()->LookupTS(req.instance()));
   RETURN_NOT_OK(CheckLeaseFence(req.instance().permanent_uuid(), req.instance().instance_seqno()));
@@ -1850,6 +1858,13 @@ void ObjectLockInfoManager::Impl::RecordReleaseOutcome(
                    .lease_epoch = lease_epoch,
                    .instance_seqno = lease_info.instance_seqno(),
                    .hold_off_until = std::nullopt});
+  YB_LOG_TIMEOUT_EXPIRED(
+      "object_lock_release_fence_after_ms", fence_after,
+      (now - failing.first_failure).ToMilliseconds())
+      << "side=master tserver=" << ts_uuid << " request_id=" << request_id
+      << " failures=" << failing.num_failures
+      << " min_failures=" << FLAGS_object_lock_release_fence_min_failures
+      << " lease_epoch=" << lease_epoch << " outcome=lease_fenced last_error=" << status;
   LOG(WARNING) << Format(
       "Fencing ysql lease epoch $0 of tserver $1: object lock release request $2 has failed $3 "
       "times over $4 while the tserver kept its lease. Last error: $5",

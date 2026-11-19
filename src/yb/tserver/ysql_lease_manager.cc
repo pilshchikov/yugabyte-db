@@ -105,6 +105,8 @@ class YSQLLeaseManager::Impl {
   mutable Mutex lease_toggle_lock_;
   CoarseTimePoint lease_expiry_time_ GUARDED_BY(lease_toggle_lock_);
   CoarseTimePoint lease_update_time_ GUARDED_BY(lease_toggle_lock_);
+  uint64_t lease_ttl_ms_ GUARDED_BY(lease_toggle_lock_) = 0;
+  uint64_t lease_client_buffer_ms_ GUARDED_BY(lease_toggle_lock_) = 0;
   bool lease_is_live_ GUARDED_BY(lock_){false};
   uint64_t lease_epoch_ GUARDED_BY(lock_){0};
 };
@@ -157,6 +159,8 @@ Status YSQLLeaseManager::Impl::ProcessLeaseUpdate(
     }
     lease_expiry_time_ = new_lease_expiry_time;
     lease_update_time_ = CoarseMonoClock::Now();
+    lease_ttl_ms_ = lease_refresh_info.lease_ttl_ms();
+    lease_client_buffer_ms_ = lease_refresh_info.client_buffer_ms();
     lease_is_live_ = true;
     lease_epoch_ = lease_refresh_info.lease_epoch();
   }
@@ -302,11 +306,23 @@ std::optional<CoarseTimePoint> YSQLLeaseManager::Impl::CheckLeaseStatusInner() {
     lease_is_live_ = false;
     lease_epoch = lease_epoch_;
   }
-  YB_LOG_TIMEOUT_EXPIRED(
-      "ysql_operation_lease_ttl", ToMilliseconds(lease_expiry_time_ - lease_update_time_),
-      ToMilliseconds(CoarseMonoClock::now() - lease_update_time_))
-      << "side=tserver lease_epoch=" << lease_epoch
-      << " waited_since=last_lease_refresh_received";
+  if (lease_ttl_ms_ > lease_client_buffer_ms_) {
+    const auto effective_ttl = std::chrono::milliseconds(lease_ttl_ms_ - lease_client_buffer_ms_);
+    YB_LOG_TIMEOUT_EXPIRED(
+        "ysql_operation_lease_ttl", lease_ttl_ms_,
+        ToMilliseconds(CoarseMonoClock::now() - (lease_expiry_time_ - effective_ttl)))
+        << "side=tserver client_buffer_ms=" << lease_client_buffer_ms_
+        << " effective_ttl_ms=" << effective_ttl.count() << " lease_epoch=" << lease_epoch
+        << " refresh_received_after_ms="
+        << ToMilliseconds(lease_update_time_ - (lease_expiry_time_ - effective_ttl))
+        << " waited_since=last_granted_refresh_sent";
+  } else {
+    YB_LOG_TIMEOUT_EXPIRED(
+        "ysql_operation_lease_ttl", ToMilliseconds(lease_expiry_time_ - lease_update_time_),
+        ToMilliseconds(CoarseMonoClock::now() - lease_update_time_))
+        << "side=tserver lease_epoch=" << lease_epoch
+        << " waited_since=last_lease_refresh_received";
+  }
   // todo(zdrudi): make this a fatal?
   LOG(INFO) << "Lease has expired, killing pg sessions.";
   if (FLAGS_TEST_delay_ysql_lease_expiry_pg_kill_ms != 0) {
