@@ -5522,6 +5522,21 @@ YbWaitForBackendsCatalogVersion(bool error_on_timeout)
 									   GetCurrentTimestamp(),
 									   timeout_ms))
 		{
+			char		context[256];
+
+			snprintf(context, sizeof(context),
+					 "side=pg wait=%s database_oid=%u catalog_version=%" PRIu64
+					 " lagging_backends=%d pid=%d on_timeout=%s",
+					 error_on_timeout ? "backends_catalog_version" : "short_catalog_version",
+					 MyDatabaseId, new_catalog_version, num_lagging_backends,
+					 MyProcPid, error_on_timeout ? "error" : "return_ok");
+			YBCLogTimeoutExpired(error_on_timeout
+								 ? "yb_wait_for_backends_catalog_version_timeout"
+								 : "wait_for_ysql_backends_catalog_version_client_master_rpc_timeout_ms",
+								 timeout_ms,
+								 TimestampDifferenceMilliseconds(start,
+																 GetCurrentTimestamp()),
+								 context);
 			if (!error_on_timeout)
 				return;
 

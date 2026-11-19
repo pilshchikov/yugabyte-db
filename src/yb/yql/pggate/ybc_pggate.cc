@@ -1450,6 +1450,11 @@ YbcStatus YBCPgWaitForBackendsCatalogVersion(YbcPgOid dboid, uint64_t version, p
                                 num_lagging_backends);
 }
 
+void YBCLogTimeoutExpired(
+    const char* name, int64_t limit_ms, int64_t waited_ms, const char* context) {
+  YB_LOG_TIMEOUT_EXPIRED(name, limit_ms, waited_ms) << context;
+}
+
 YbcStatus YBCPgBackfillIndex(
     const YbcPgOid database_oid,
     const YbcPgOid index_oid,

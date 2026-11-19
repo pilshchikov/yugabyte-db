@@ -506,6 +506,9 @@ YbcStatus YBCPgWaitForBackendsCatalogVersion(
     pid_t pid,
     int* num_lagging_backends);
 
+void YBCLogTimeoutExpired(
+    const char* name, int64_t limit_ms, int64_t waited_ms, const char* context);
+
 YbcStatus YBCPgBackfillIndex(
     const YbcPgOid database_oid,
     const YbcPgOid index_relfilenode_oid,

@@ -356,6 +356,13 @@ bool RetryingRpcTask::RescheduleWithBackoffDelay() {
   if (delay_millis <= 0) {
     auto status = STATUS(TimedOut, "Request timed out");
     LOG_WITH_PREFIX(WARNING) << status;
+    const bool unresponsive_deadline = deadline_ == UnresponsiveDeadline();
+    YB_LOG_TIMEOUT_EXPIRED(
+        unresponsive_deadline ? "unresponsive_ts_rpc_timeout_ms" : "master_async_task_deadline",
+        deadline_.GetDeltaSince(start_timestamp_).ToMilliseconds(),
+        now.GetDeltaSince(start_timestamp_).ToMilliseconds())
+        << "side=master task=" << type_name() << " attempts=" << attempt_
+        << " request=" << description();
     TransitionToFailedState(task_state, status);
     return false;
   }
