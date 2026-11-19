@@ -469,15 +469,17 @@ class TSLocalLockManager::Impl {
     LOG_IF_WITH_FUNC(DFATAL, req.status_tablet().empty())
         << "Expected non-empty status tablet for lock req: " << req.ShortDebugString()
         << ". Could lead to tserver crash if this lock blocks other requests.";
+    const auto received_at = CoarseMonoClock::Now();
+    const CoarseTimePoint refresh_deadline = received_at + FLAGS_refresh_waiter_timeout_ms * 1ms;
     object_lock_manager_.Lock(
       docdb::LockData{
           .key_to_lock = std::move(keys_to_lock),
-          .deadline = std::min(
-              deadline,
-              (CoarseTimePoint) (CoarseMonoClock::Now() + FLAGS_refresh_waiter_timeout_ms * 1ms)),
+          .deadline = std::min(deadline, refresh_deadline),
           .object_lock_owner = std::move(object_lock_owner),
           .status_tablet = req.status_tablet(),
           .start_time = MonoTime::FromUint64(req.propagated_hybrid_time()),
+          .received_at = received_at,
+          .deadline_is_waiter_refresh = refresh_deadline <= deadline,
           .background_transaction_id = background_transaction_id,
           .callback = [this, lock_contexts = std::move(lock_contexts),
                        cb = std::move(callback)](Status status) -> void {

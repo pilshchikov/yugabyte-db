@@ -100,6 +100,17 @@ const Status kShuttingDownError = STATUS(
 const Status kTryAgain = STATUS(
     TryAgain, "Failed to acquire object locks within deadline");
 
+std::string DeadlineLimitMs(const LockData& data) {
+  if (data.deadline == CoarseTimePoint::max()) {
+    return "none";
+  }
+  return std::to_string(ToMilliseconds(data.deadline - data.received_at));
+}
+
+const char* DeadlineCap(const LockData& data) {
+  return data.deadline_is_waiter_refresh ? "refresh_waiter_timeout_ms" : "request_deadline";
+}
+
 const Status kTxnExpired = STATUS(
     Expired, "Transaction expired, all acquired object locks have been released");
 
@@ -371,6 +382,18 @@ class WaitForLockersContext {
     return CoarseMonoClock::Now() > deadline_;
   }
 
+  void LogExpired() EXCLUDES(mutex_) {
+    std::lock_guard lock(mutex_);
+    if (responded_ || pending_txns_.empty()) {
+      return;
+    }
+    YB_LOG_TIMEOUT_EXPIRED(
+        "wait_for_lockers_deadline", ToMilliseconds(deadline_ - start_),
+        ToMilliseconds(CoarseMonoClock::Now() - start_))
+        << "side=tserver pending_txns=" << pending_txns_.size()
+        << " first_pending_txn=" << *pending_txns_.begin();
+  }
+
  private:
   void RespondIfAllDoneUnlocked(
       std::unique_lock<std::mutex>& lock, Status status) REQUIRES(mutex_) {
@@ -392,6 +415,7 @@ class WaitForLockersContext {
   std::unique_ptr<ScopedWaitingTxnRegistration> waiter_registration_ GUARDED_BY(mutex_);
   StdStatusCallback final_callback_;
   CoarseTimePoint deadline_;
+  const CoarseTimePoint start_ = CoarseMonoClock::Now();
   bool responded_ GUARDED_BY(mutex_) = false;
 };
 
@@ -847,10 +871,10 @@ Status ObjectLockManagerImpl::MakePrepareAcquireResult(
   RETURN_NOT_OK(resume_with_status);
   if (data.deadline < CoarseMonoClock::Now()) {
     YB_LOG_TIMEOUT_EXPIRED(
-        "object_lock_acquire_deadline",
-        "unknown", (MonoTime::Now() - data.start_time).ToMilliseconds())
+        "object_lock_acquire_deadline", DeadlineLimitMs(data),
+        ToMilliseconds(CoarseMonoClock::Now() - data.received_at))
         << "txn=" << data.object_lock_owner.txn_id << " status_tablet=" << data.status_tablet
-        << " stage=prepare_acquire";
+        << " capped_by=" << DeadlineCap(data) << " stage=prepare_acquire";
     return kTryAgain;
   }
   if (shutdown_in_progress_) {
@@ -1248,12 +1272,11 @@ void ObjectLockManagerImpl::Poll() {
         auto waiter_entry = *index.begin();
         index.erase(index.begin());
         {
-          const auto waited_ms = (MonoTime::Now() - waiter_entry->lock_data.start_time)
-                                     .ToMilliseconds();
           YB_LOG_TIMEOUT_EXPIRED(
-              "object_lock_acquire_deadline",
-              waited_ms - ToMilliseconds(now - waiter_entry->deadline()), waited_ms)
+              "object_lock_acquire_deadline", DeadlineLimitMs(waiter_entry->lock_data),
+              ToMilliseconds(now - waiter_entry->lock_data.received_at))
               << "txn=" << waiter_entry->txn_id()
+              << " capped_by=" << DeadlineCap(waiter_entry->lock_data)
               << " key=" << AsString(waiter_entry->resume_it()->key)
               << " mode=" << AsString(waiter_entry->resume_it()->intent_types)
               << " blocking_txns=" << AsString(waiter_entry->blocking_txn_ids)
@@ -1276,6 +1299,7 @@ void ObjectLockManagerImpl::Poll() {
     waiter->Resume(this, kTryAgain);
   }
   for (auto& tracker : expired_lock_waiters_trackers) {
+    tracker->LogExpired();
     tracker->RespondIfAllDone(kTimedOut);
   }
 }

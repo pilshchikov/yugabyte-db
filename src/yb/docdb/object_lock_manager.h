@@ -37,6 +37,8 @@ struct LockData {
   ObjectLockOwner object_lock_owner;
   TabletId status_tablet;
   MonoTime start_time;
+  CoarseTimePoint received_at = CoarseMonoClock::Now();
+  bool deadline_is_waiter_refresh = false;
   TransactionId background_transaction_id = TransactionId::Nil();
   StdStatusCallback callback;
 
