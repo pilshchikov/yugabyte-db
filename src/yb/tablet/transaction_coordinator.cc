@@ -1969,9 +1969,9 @@ class TransactionCoordinator::Impl : public TransactionStateContext,
                   << " involved_tablets=" << state.num_involved_tablets()
                   << " heartbeats=" << state.num_heartbeats() << " age_ms="
                   << (state.first_touch()
-                      ? (now.GetPhysicalValueMicros() -
+                      ? (static_cast<int64_t>(now.GetPhysicalValueMicros()) -
                          static_cast<int64_t>(state.first_touch())) / 1000
-                      : -1)
+                      : int64_t{-1})
                   << " coordinator=" << LogPrefix();
               state.Abort();
             });
