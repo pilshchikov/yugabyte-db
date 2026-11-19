@@ -139,6 +139,15 @@ namespace client {
 
 namespace {
 
+std::string TransactionTimeoutMsString() {
+  std::string periods;
+  if (!google::GetCommandLineOption("transaction_max_missed_heartbeat_periods", &periods)) {
+    return "unknown";
+  }
+  return std::to_string(static_cast<int64_t>(
+      std::stod(periods) * FLAGS_transaction_heartbeat_usec / 1000));
+}
+
 YB_STRONGLY_TYPED_BOOL(Child);
 YB_STRONGLY_TYPED_BOOL(SendHeartbeatToNewTablet);
 YB_STRONGLY_TYPED_BOOL(SetReady);
@@ -2406,6 +2415,7 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
     }
 
     if (status.ok()) {
+      last_ok_heartbeat_.store(CoarseMonoClock::Now(), std::memory_order_relaxed);
       std::weak_ptr<YBTransaction> weak_transaction(transaction);
       switch (transaction_status) {
         case TransactionStatus::PROMOTED:
@@ -2458,13 +2468,16 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
       auto state = state_.load(std::memory_order_acquire);
       LOG_WITH_PREFIX(WARNING) << "Send heartbeat failed: " << status << ", txn state: " << state;
       if (status.IsExpired()) {
+        const auto last_ok = last_ok_heartbeat_.load(std::memory_order_relaxed);
         const auto start_us = start_.load(std::memory_order_relaxed);
         YB_LOG_TIMEOUT_EXPIRED(
-            "transaction_max_missed_heartbeat_periods", "coordinator_side",
-            start_us == 0 ? 0 :
+            "transaction_max_missed_heartbeat_periods", TransactionTimeoutMsString(),
+            last_ok == CoarseTimePoint() ? "none"
+                : std::to_string(ToMilliseconds(CoarseMonoClock::Now() - last_ok)))
+            << "side=client waited_since=last_ok_heartbeat txn_age_ms="
+            << (start_us == 0 ? 0 :
                 (manager_->clock()->Now().GetPhysicalValueMicros() - start_us) / 1000)
-            << "side=client txn_state=" << state << " heartbeat_status=" << status << " "
-            << LogPrefix();
+            << " txn_state=" << state << " heartbeat_status=" << status << " " << LogPrefix();
       }
 
       if (status.IsAborted() || status.IsExpired() || status.IsShutdownInProgress() ||
@@ -2843,6 +2856,7 @@ class YBTransaction::Impl final : public internal::TxnBatcherIf {
   const ash::WaitStateInfoPtr wait_state_;
 
   std::atomic<MicrosTime> start_;
+  std::atomic<CoarseTimePoint> last_ok_heartbeat_{CoarseTimePoint()};
 
   // Manager is created once per service.
   TransactionManager* const manager_;

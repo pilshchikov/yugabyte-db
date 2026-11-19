@@ -245,6 +245,14 @@ class TransactionState {
     return pending_involved_tablets_;
   }
 
+  size_t num_involved_tablets() const {
+    return std::max(pending_involved_tablets_.size(), involved_tablets_.size());
+  }
+
+  uint64_t num_heartbeats() const {
+    return num_heartbeats_;
+  }
+
   // Status of transaction.
   TransactionStatus status() const {
     return status_;
@@ -773,6 +781,9 @@ class TransactionState {
             "Transaction in wrong state during heartbeat: $0",
             TransactionStatus_Name(status_));
       }
+      if (txn_status == TransactionStatus::PENDING) {
+        ++num_heartbeats_;
+      }
 
       if (state.has_pg_session_req_version() && pg_session_req_version_ &&
           state.pg_session_req_version() < *pg_session_req_version_) {
@@ -1083,6 +1094,7 @@ class TransactionState {
   HybridTime deadlock_time_ = HybridTime::kInvalid;
   MicrosTime first_touch_;
   HybridTime last_touch_;
+  uint64_t num_heartbeats_ = 0;
   // It should match last_touch_, but it is possible that because of some code errors it
   // would not be so. To add stability we introduce a separate field for it.
   HybridTime commit_time_;
@@ -1952,7 +1964,14 @@ class TransactionCoordinator::Impl : public TransactionStateContext,
                   ToMilliseconds(GetTransactionTimeout()),
                   (now.GetPhysicalValueMicros() - state.last_touch().GetPhysicalValueMicros()) /
                       1000)
-                  << "txn=" << state.id() << " status=" << TransactionStatus_Name(state.status())
+                  << "kind=" << (state.num_involved_tablets() ? "writer" : "no_writes")
+                  << " txn=" << state.id() << " status=" << TransactionStatus_Name(state.status())
+                  << " involved_tablets=" << state.num_involved_tablets()
+                  << " heartbeats=" << state.num_heartbeats() << " age_ms="
+                  << (state.first_touch()
+                      ? (now.GetPhysicalValueMicros() -
+                         static_cast<int64_t>(state.first_touch())) / 1000
+                      : -1)
                   << " coordinator=" << LogPrefix();
               state.Abort();
             });
